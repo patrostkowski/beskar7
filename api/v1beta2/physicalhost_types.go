@@ -146,7 +146,28 @@ type PhysicalHostSpec struct {
 	// ConsumerRef is a reference to the Beskar7Machine that is using this host
 	// +optional
 	ConsumerRef *corev1.ObjectReference `json:"consumerRef,omitempty"`
+
+	// NetworkDataSecretRef is the name of a Secret in the PhysicalHost's
+	// namespace holding this host's network configuration under the
+	// "networkData" key, as netplan v2 (cloud-init network-config v2). The
+	// inspector writes it verbatim to /oem/beskar7/network-data on the
+	// installed disk, and the OS image applies it; beskar7 never parses it.
+	// The Secret must carry the
+	// beskar7.infrastructure.cluster.x-k8s.io/network-data-host annotation
+	// naming this host, and its data must not exceed 64 KiB. While the
+	// NetworkDataReady condition is not True, a claim of this host waits
+	// before powering it on.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	NetworkDataSecretRef string `json:"networkDataSecretRef,omitempty"`
 }
+
+// NetworkDataSecretKey is the data key of the Secret NetworkDataSecretRef
+// names, the same key Metal3 uses.
+const NetworkDataSecretKey = "networkData"
+
+// MaxNetworkDataSize caps the network data a Secret may hold.
+const MaxNetworkDataSize = 64 << 10
 
 // InspectionPhase represents the current phase of hardware inspection
 type InspectionPhase string
@@ -510,6 +531,30 @@ const (
 	// than failing: every Secret written before the annotations existed reads
 	// this way, and annotating it recovers the host.
 	CredentialsNotAuthorizedReason string = "CredentialsNotAuthorized"
+)
+
+// NetworkDataReadyCondition reports whether the Secret NetworkDataSecretRef
+// names can be served to the host. It is set only while NetworkDataSecretRef
+// is, and removed when the reference is cleared.
+const NetworkDataReadyCondition = "NetworkDataReady"
+
+// Reasons of NetworkDataReadyCondition.
+const (
+	// NetworkDataReadyReason (True): the Secret exists, names this host in its
+	// network-data-host annotation, and holds a non-empty networkData key
+	// within MaxNetworkDataSize.
+	NetworkDataReadyReason string = "NetworkDataReady"
+	// NetworkDataSecretNotFoundReason (False): the referenced Secret does not exist.
+	NetworkDataSecretNotFoundReason string = "SecretNotFound"
+	// NetworkDataSecretNotOptedInReason (False): the Secret's
+	// network-data-host annotation is missing or names another host.
+	NetworkDataSecretNotOptedInReason string = "SecretNotOptedIn"
+	// NetworkDataKeyMissingReason (False): the Secret has no non-empty
+	// networkData key.
+	NetworkDataKeyMissingReason string = "KeyMissing"
+	// NetworkDataTooLargeReason (False): the networkData key exceeds
+	// MaxNetworkDataSize.
+	NetworkDataTooLargeReason string = "TooLarge"
 )
 
 // +kubebuilder:object:root=true

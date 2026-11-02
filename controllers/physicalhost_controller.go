@@ -277,6 +277,10 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 	// host already fulfilled.
 	r.adoptProvisionedClaim(ctx, logger, physicalHost)
 
+	// Needs nothing from the BMC either, and a claim waits on it before
+	// powering the host on.
+	r.reconcileNetworkData(ctx, logger, physicalHost)
+
 	// The inspector's reports go first, before the BMC is tried. They need
 	// nothing from the BMC, and the run's Error they may write outlasts whatever
 	// the connection does next: no connection failure overwrites a claimed
@@ -1335,9 +1339,10 @@ func (r *PhysicalHostReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // SecretToPhysicalHosts maps Secret changes to PhysicalHost reconcile requests:
-// a host's BMC credentials Secret and its bootstrap-token Secret. The latter
-// carries a controller reference to its host, but Owns would register a second
-// Secret watch; one mapper covers both. The watch has no predicate, so an edit
+// a host's BMC credentials Secret, its bootstrap-token Secret and its network
+// data Secret. The bootstrap-token Secret carries a controller reference to its
+// host, but Owns would register a second Secret watch; one mapper covers all
+// three. The watch has no predicate, so an edit
 // to the credentials Secret's annotations alone (D-030) reconciles every host
 // that names it: that is how annotating the Secret recovers a host refused
 // with CredentialsNotAuthorized, which is otherwise only requeued after minutes.
@@ -1357,10 +1362,12 @@ func (r *PhysicalHostReconciler) SecretToPhysicalHosts(ctx context.Context, obj 
 
 	var requests []reconcile.Request
 	for _, ph := range physicalHostList.Items {
-		// The BMC credentials a host connects with, and its bootstrap-token
-		// Secret, which mirrorBootstrapCredentials copies into its status.
+		// The BMC credentials a host connects with, its bootstrap-token
+		// Secret, which mirrorBootstrapCredentials copies into its status, and
+		// its network data Secret, so fixing it recovers NetworkDataReady.
 		if ph.Spec.RedfishConnection.CredentialsSecretRef == secret.Name ||
-			bootstrapTokenSecretName(ph.Name) == secret.Name {
+			bootstrapTokenSecretName(ph.Name) == secret.Name ||
+			ph.Spec.NetworkDataSecretRef == secret.Name {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Namespace: ph.Namespace,

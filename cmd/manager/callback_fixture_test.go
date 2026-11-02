@@ -48,6 +48,7 @@ type callbackFixture struct {
 	token         string
 	nonce         string
 	bootstrapData string
+	networkData   string
 }
 
 // createCallbackFixture creates the fixture in namespace with c. The host is
@@ -56,8 +57,22 @@ type callbackFixture struct {
 func createCallbackFixture(t *testing.T, c client.Client, namespace string) callbackFixture {
 	t.Helper()
 	ctx := context.Background()
-	fx := callbackFixture{namespace: namespace, host: "host-1", bootstrapData: "#cloud-config\n"}
-	const machineName, b7mName = "machine-1", "b7m-1"
+	fx := callbackFixture{
+		namespace:     namespace,
+		host:          "host-1",
+		bootstrapData: "#cloud-config\n",
+		networkData:   "network:\n  version: 2\n",
+	}
+	const machineName, b7mName, networkDataName = "machine-1", "b7m-1", "host-1-network-data"
+
+	mustCreate(t, c, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        networkDataName,
+			Namespace:   namespace,
+			Annotations: map[string]string{controllers.NetworkDataHostAnnotation: fx.host},
+		},
+		Data: map[string][]byte{infrav1.NetworkDataSecretKey: []byte(fx.networkData)},
+	})
 
 	bootstrapSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: machineName + "-bootstrap", Namespace: namespace},
@@ -109,6 +124,7 @@ func createCallbackFixture(t *testing.T, c client.Client, namespace string) call
 				Kind: "Beskar7Machine", APIVersion: infrav1.GroupVersion.String(),
 				Name: b7mName, Namespace: namespace,
 			},
+			NetworkDataSecretRef: networkDataName,
 		},
 	}
 	mustCreate(t, c, host)

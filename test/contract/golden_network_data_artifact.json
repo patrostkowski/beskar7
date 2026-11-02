@@ -1,0 +1,11 @@
+{
+  "namespace": "contract-test",
+  "host": "host-01",
+  "endpoint": "/api/v1/networkdata/contract-test/host-01",
+  "secretKey": "networkData",
+  "hostAnnotation": "beskar7.infrastructure.cluster.x-k8s.io/network-data-host",
+  "artifactPath": "/oem/beskar7/network-data",
+  "content": "network:\n  version: 2\n  ethernets:\n    leg1:\n      match:\n        macaddress: \"02:00:00:00:00:01\"\n      dhcp4: false\n  vlans:\n    vlan208:\n      id: 208\n      link: leg1\n      addresses: [192.0.2.15/24]\n      routes:\n        - to: default\n          via: 192.0.2.1\n      nameservers:\n        addresses: [192.0.2.53]\n",
+  "mode": "0600",
+  "owner": "root"
+}

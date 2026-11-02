@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -27,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrav1 "github.com/projectbeskar/beskar7/api/v1beta2"
-	"github.com/projectbeskar/beskar7/internal/auth"
 )
 
 // bootstrapDataSecretKey is the canonical key under which CAPI bootstrap
@@ -91,39 +89,20 @@ func (h *BootstrapHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// 1. Get PhysicalHost. The bearer verifier already did the same Get for
-	// auth purposes, but we re-Get here to read Spec.ConsumerRef from the same
-	// resourceVersion as the rest of the chain walk.
-	ph := &infrav1.PhysicalHost{}
-	if err := h.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: hostName}, ph); err != nil {
-		log.V(1).Info("bootstrap GET: PhysicalHost lookup failed", "err", err.Error())
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-
-	// 2. Walk to the Beskar7Machine via Spec.ConsumerRef, and only to the one
-	// the host's credentials were minted for (SEC-12, D-029). The lookup is
-	// pinned to the host's own namespace, so a host in namespace A can never
-	// serve namespace B's bootstrap data, and the verifier's binding check is
-	// repeated against the host as read here: a ConsumerRef re-pointed after
-	// the verifier ran still cannot reach another machine's data.
-	creds, consumerKey, err := boundBootstrapCredentials(ctx, h.Client, ph)
+	// 1-2. Re-read the host and walk to the Beskar7Machine via
+	// Spec.ConsumerRef, only to the one the host's credentials were minted for
+	// (SEC-12, D-029), with the token checked again against those credentials
+	// (resolveBoundCallbackHost). The lookup is pinned to the host's own
+	// namespace, so a host in namespace A can never serve namespace B's
+	// bootstrap data.
+	bound, err := resolveBoundCallbackHost(r, h.Client)
 	if err != nil {
-		log.V(1).Info("bootstrap GET: PhysicalHost has no Beskar7Machine consumer bound to its credentials", "err", err.Error())
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	// The verifier checked the token against its own read of the Secret. A
-	// release and re-mint landing between that read and this one would pair
-	// the old token with the new claim, so the token is checked again against
-	// the credentials this walk is about to serve from.
-	if token, ok := auth.BearerToken(r); !ok || !creds.tokenValid(time.Now()) || !auth.Verify(token, auth.Hash(creds.token)) {
-		log.V(1).Info("bootstrap GET: bearer token does not match the host's current credentials")
+		log.V(1).Info("bootstrap GET: the host's bound credentials do not authorise this request", "err", err.Error())
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	b7m := &infrav1.Beskar7Machine{}
-	if err := h.Client.Get(ctx, consumerKey, b7m); err != nil {
+	if err := h.Client.Get(ctx, bound.consumer, b7m); err != nil {
 		log.V(1).Info("bootstrap GET: Beskar7Machine lookup failed", "err", err.Error())
 		http.Error(w, "not found", http.StatusNotFound)
 		return

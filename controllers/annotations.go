@@ -69,6 +69,13 @@ const (
 	BMCCASecretAnnotation          = "beskar7.infrastructure.cluster.x-k8s.io/bmc-ca-secret"
 )
 
+// NetworkDataHostAnnotation lives on the Secret a PhysicalHost's
+// networkDataSecretRef names and opts that Secret in: its value is the name of
+// the one host in the same namespace allowed to have it served. Without it,
+// anyone who may patch a PhysicalHost could have the callback server hand any
+// Secret in the namespace to whoever holds the host's token.
+const NetworkDataHostAnnotation = "beskar7.infrastructure.cluster.x-k8s.io/network-data-host"
+
 // BootstrapURLAnnotation is retired. Releases before it signalled the per-host
 // bootstrap URL through it: the Beskar7Machine controller computed the URL and
 // annotated the PhysicalHost with it, and the PhysicalHost controller copied the

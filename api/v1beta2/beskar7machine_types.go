@@ -92,6 +92,12 @@ const (
 	// D-030 annotations for its address, which annotating the Secret clears). The
 	// machine waits and carries on once the host is healthy again.
 	WaitingForBMCReason string = "WaitingForBMC"
+	// WaitingForNetworkDataReason (not terminal) indicates that the associated
+	// PhysicalHost names a network data Secret (spec.networkDataSecretRef) and
+	// its NetworkDataReady condition is not True. The host is not powered on
+	// until the Secret is fixed, so a broken network config never installs a
+	// host without its network.
+	WaitingForNetworkDataReason string = "WaitingForNetworkData"
 	// ReleasePhysicalHostFailedReason (Severity=Warning) indicates that releasing the
 	// associated PhysicalHost failed during deletion.
 	ReleasePhysicalHostFailedReason string = "ReleasePhysicalHostFailed"

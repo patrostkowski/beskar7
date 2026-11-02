@@ -56,14 +56,14 @@ func RequireBearer(log logr.Logger, verifier Verifier, next http.Handler) http.H
 		// Fail closed by rejecting every request.
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			log.Error(nil, "RequireBearer wired without a Verifier; rejecting all requests")
-			writeUnauthorized(w)
+			WriteUnauthorized(w)
 		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r.Header.Get("Authorization"))
 		if !ok {
 			log.V(1).Info("auth: missing or malformed Authorization header", "tokenPresent", false)
-			writeUnauthorized(w)
+			WriteUnauthorized(w)
 			return
 		}
 		if err := verifier(token, r); err != nil {
@@ -72,7 +72,7 @@ func RequireBearer(log logr.Logger, verifier Verifier, next http.Handler) http.H
 			// NOT contain the plaintext token — by contract the verifier never
 			// echoes its first argument.
 			log.V(1).Info("auth: verifier rejected token", "tokenPresent", true, "err", err.Error())
-			writeUnauthorized(w)
+			WriteUnauthorized(w)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -115,10 +115,11 @@ func extractBearerToken(headerValue string) (string, bool) {
 	return token, true
 }
 
-// writeUnauthorized writes the canonical 401 response. Always the same headers,
+// WriteUnauthorized writes the canonical 401 response, for the middleware and
+// for a handler that re-checks the token after it. Always the same headers,
 // always the same body. Never includes a WWW-Authenticate challenge with
 // information about the failure reason.
-func writeUnauthorized(w http.ResponseWriter) {
+func WriteUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	// Errors here would mean the client closed the connection early; nothing useful

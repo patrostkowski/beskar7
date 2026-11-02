@@ -85,7 +85,13 @@ If the Secret does not authorise the address, or the host's `caBundleSecretRef`,
 |---|---|---|---|
 | `consumerRef` | `*ObjectReference` | no | Set by the `Beskar7Machine` reconciler when it claims the host. Acts as the lock. Cleared on Beskar7Machine deletion (best-effort BMC cleanup runs first; see `controllers/beskar7machine_controller.go:reconcileDelete`). |
 
-There are no other spec fields. Provisioning is driven by the consumer (the `Beskar7Machine`); the host itself only carries connection info and the consumer reference.
+#### `spec.networkDataSecretRef`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `networkDataSecretRef` | string | no | Name of a Secret in the same namespace holding this host's netplan v2 under the `networkData` key (at most 64 KiB). The Secret must carry `beskar7.infrastructure.cluster.x-k8s.io/network-data-host: <host name>`. Served verbatim to the inspector, which writes it to `/oem/beskar7/network-data`; the OS image applies it. A claim waits before power-on while `NetworkDataReady` is not `True`. See [PhysicalHost → Network data](physicalhost.md#network-data). |
+
+There are no other spec fields. Provisioning is driven by the consumer (the `Beskar7Machine`); the host itself only carries connection info, the consumer reference and the optional network data reference.
 
 ### `status`
 
@@ -160,6 +166,7 @@ Per-host bootstrap fetch coordinates, a read-only mirror of the host's callback 
 | `RedfishConnectionReady` | `PhysicalHost` | `RedfishConnected` | `MissingCredentials` (covers a missing secret ref, a secret that doesn't exist, a `Get` error, or a missing `username`/`password` key — the controller collapses all credential-fetch failures to this one reason), `BMCUnreachable` (the BMC cannot be reached at the network level — retried every 15 s and clears by itself; a consuming `Beskar7Machine` waits it out), `CredentialsNotAuthorized` (the credentials Secret's [annotations](#credentials-secret-annotations) do not authorise `address` or its transport — no request is made; cleared by annotating the Secret, and a consuming `Beskar7Machine` waits for that too), `RedfishConnectionFailed`, `RedfishQueryFailed`, `InsecureCABundleConflict`, `CABundleFetchFailed`. |
 | `HostAvailable` | `PhysicalHost` | `HostAvailable` | `HostClaimed` (a consumer holds the host — `spec.consumerRef` is set; the condition returns to `True` once the claim is released. It follows the claim only: BMC health is `RedfishConnectionReady`). |
 | `HostInspected` | `PhysicalHost` | `HostInspected` | `HostReleased` (the host went back to `Available`; the prior inspection describes a run that ended, not the hardware). |
+| `NetworkDataReady` | `PhysicalHost` | `NetworkDataReady` | Present only while `spec.networkDataSecretRef` is set. `SecretNotFound`, `SecretNotOptedIn` (no `network-data-host` annotation naming the host), `KeyMissing`, `TooLarge` (over 64 KiB). A consuming `Beskar7Machine` waits with `WaitingForNetworkData` before power-on. |
 
 ### Example
 
@@ -254,7 +261,7 @@ There is no `status.failureReason` or `status.failureMessage` — both were remo
 | Type | Set by | True reason | False / other reasons |
 |---|---|---|---|
 | `Ready` | `Beskar7Machine` (summary) | Derived from the summarized conditions; carries the reason of the one that isn't `True` when only one is at fault. | Same, `False`/`Unknown`. |
-| `InfrastructureReady` | `Beskar7Machine` | `Provisioned` — the host reached `Ready` (inspector's provisioned callback received) and `providerID` is set. | `PhysicalHostNotReady` (host claimed but not yet `Ready`); `WaitingForTargetImageDigest` (the machine names its digest by `targetImageDigestURL` and the file does not resolve yet; no host is claimed; not terminal — the controller retries every 30 seconds to 5 minutes); `WaitingForBMC` (the host cannot reach its BMC, or its credentials Secret does not authorise the BMC's address yet; not terminal — the machine carries on once the host does); `BootstrapCredentialsConflict` (a Secret the host does not own sits under its `<host>-bootstrap-token` name; not terminal — delete it and the next pass creates the host's own); terminal: `HardwareRequirementsNotMet`, `InspectionFailed`, `InspectionTimedOut`, `DeploymentTimedOut`, `DeploymentFailed`, `PhysicalHostError`, `BootstrapDataUnavailable`, `InvalidHostSelector`. |
+| `InfrastructureReady` | `Beskar7Machine` | `Provisioned` — the host reached `Ready` (inspector's provisioned callback received) and `providerID` is set. | `PhysicalHostNotReady` (host claimed but not yet `Ready`); `WaitingForTargetImageDigest` (the machine names its digest by `targetImageDigestURL` and the file does not resolve yet; no host is claimed; not terminal — the controller retries every 30 seconds to 5 minutes); `WaitingForBMC` (the host cannot reach its BMC, or its credentials Secret does not authorise the BMC's address yet; not terminal — the machine carries on once the host does); `WaitingForNetworkData` (the host's network data Secret is not ready; the host is not powered on until it is; not terminal); `BootstrapCredentialsConflict` (a Secret the host does not own sits under its `<host>-bootstrap-token` name; not terminal — delete it and the next pass creates the host's own); terminal: `HardwareRequirementsNotMet`, `InspectionFailed`, `InspectionTimedOut`, `DeploymentTimedOut`, `DeploymentFailed`, `PhysicalHostError`, `BootstrapDataUnavailable`, `InvalidHostSelector`. |
 | `PhysicalHostAssociated` | `Beskar7Machine` | `PhysicalHostAssociated` | `PhysicalHostAssociationFailed`, `WaitingForPhysicalHost` (no `Available` host at all), `NoMatchingPhysicalHost` (hosts are `Available` but none satisfies `hostSelector` / the Machine's failure domain), `InvalidHostSelector` (terminal). |
 | `BootstrapDataReady` | `Beskar7Machine` | `BootstrapDataReady` | `WaitingForBootstrapData`, `BootstrapDataUnavailable` (terminal). |
 | `Paused` | `sigs.k8s.io/cluster-api/util/paused` | `Paused` | `NotPaused`. |

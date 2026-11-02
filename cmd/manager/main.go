@@ -155,7 +155,7 @@ func main() {
 		"Which reconcilers this instance runs. 'all' (the default) registers the "+
 			"Beskar7Machine, Beskar7Cluster and PhysicalHost controllers. 'none' is "+
 			"callback-only: the instance serves the host-callback HTTPS endpoints (/boot, "+
-			"/api/v1/inspection, /api/v1/bootstrap, /api/v1/provisioned, "+
+			"/api/v1/inspection, /api/v1/bootstrap, /api/v1/networkdata, /api/v1/provisioned, "+
 			"/api/v1/provision-failed) and the health probes but registers no reconciler "+
 			"or webhook. Use 'none' for a second instance placed on the provisioning "+
 			"network when PXE-booting hosts cannot reach the management cluster; a second "+

@@ -25,6 +25,7 @@ spec:
     insecureSkipVerify: false        # default
     # caBundleSecretRef: bmc-ca-bundle  # optional, mutually exclusive with insecureSkipVerify=true
   # consumerRef is set by the Beskar7Machine controller; do not set manually
+  # networkDataSecretRef: host-01-network-data  # optional, see "Network data"
 ```
 
 The credentials Secret must contain `username` and `password` keys (Opaque). It must live in the same namespace as the PhysicalHost, and it must say which BMCs its credentials may be sent to — see the next section.
@@ -57,6 +58,48 @@ When the Secret does not authorise the host's address, the controller makes no R
 List the addresses your BMCs really have. Do not widen the list to whatever the hosts currently say — a host someone already re-pointed would put their endpoint on it. Re-pointing a host to another address that *is* on the list still works; that is an integrity concern the list does not address, not a credential leak.
 
 When `caBundleSecretRef` is set, the manager builds an HTTP client whose TLS roots include the CA bundle. The Secret data must contain a `ca.crt` (preferred) or `tls.crt` key with PEM bytes, and the credentials Secret must name it in `bmc-ca-secret` (above): the CA decides who can answer as the BMC, so whoever can edit a host must not be the one choosing it (decision D-033). A `caBundleSecretRef` the credentials Secret does not name is refused like an unlisted address, with `CredentialsNotAuthorized`, and the message does not repeat the name the annotation holds. Setting `caBundleSecretRef` together with `insecureSkipVerify: true` is rejected — the controller marks `RedfishConnectionReady = False (InsecureCABundleConflict)` and stops reconciling until the operator fixes the spec.
+
+## Network data
+
+A host can carry its own network configuration, for example a static address on a VLAN sub-interface it needs before it can join the cluster. Name a Secret in the host's namespace in `spec.networkDataSecretRef`. The Secret holds the configuration under the `networkData` key as netplan v2 (cloud-init network-config v2), and opts in with the annotation `beskar7.infrastructure.cluster.x-k8s.io/network-data-host` set to the host's name. Without the annotation, anyone who can edit a `PhysicalHost` could have the controller hand any Secret in the namespace to the host.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: host-01-network-data
+  annotations:
+    beskar7.infrastructure.cluster.x-k8s.io/network-data-host: host-01
+stringData:
+  networkData: |
+    network:
+      version: 2
+      ethernets:
+        leg1:
+          match:
+            macaddress: "74:56:3c:49:7b:3c"
+          dhcp4: false
+      vlans:
+        vlan208:
+          id: 208
+          link: leg1
+          addresses: [172.21.208.15/24]
+          routes:
+            - to: default
+              via: 172.21.208.1
+          nameservers:
+            addresses: [8.8.8.8]
+```
+
+What beskar7 does with it:
+
+- The controller checks that the Secret exists, carries the annotation for this host, and holds a non-empty `networkData` key of at most 64 KiB. It reports the result on the `NetworkDataReady` condition. It never parses the content.
+- A `Beskar7Machine` that claims the host does not power it on while `NetworkDataReady` is not `True`: it waits with `InfrastructureReady = False (WaitingForNetworkData)`. Fixing the Secret recovers the host at once, through the Secret watch, and nothing has been wiped.
+- The inspector fetches the bytes (contract v4.3, [`GET /api/v1/networkdata`](inspector-contract.md#46-get-apiv1networkdatanamespacehostname-per-host-network-data)) before it writes the disk, and writes them verbatim to `/oem/beskar7/network-data` on `COS_OEM`, mode `0600`, root-owned, next to `/oem/beskar7/provider-id`. The checks are repeated when the inspector fetches the data: if the Secret broke after the claim, the inspector reports a deploy failure instead of installing the host without its network.
+
+**The OS image applies the file, not beskar7.** The file has no `.yaml` extension, so Kairos never runs it as a cloud-config, and Kairos does not read netplan by itself. On kMetal's Kairos images, `beskar7-node-agent` translates it to systemd-networkd before the node joins. An image with nothing that reads the file installs fine and ignores it.
+
+Set `networkDataSecretRef` only with a v4.3 inspector: an older one never fetches the data and installs the host without it.
 
 ## Lifecycle
 
@@ -113,13 +156,14 @@ The annotation carries a binding in `infrastructure.cluster.x-k8s.io/inspection-
 
 ## Conditions
 
-Native `metav1.Condition` (`status.conditions[]`) — no `severity` field, and a `True` condition carries a `reason` too. `PhysicalHost` is not a CAPI contract resource: it has no `Ready` summary condition (only these three) and no `Paused` condition — its pause check (`controllers/utils.go:isPaused`) is the `cluster.x-k8s.io/paused` annotation on the host itself; a `PhysicalHost` has no owning `Cluster` to read `spec.paused` from. See [API Reference → Conditions and the CAPI mirror](api-reference.md#conditions-and-the-capi-mirror).
+Native `metav1.Condition` (`status.conditions[]`) — no `severity` field, and a `True` condition carries a `reason` too. `PhysicalHost` is not a CAPI contract resource: it has no `Ready` summary condition (only these four) and no `Paused` condition — its pause check (`controllers/utils.go:isPaused`) is the `cluster.x-k8s.io/paused` annotation on the host itself; a `PhysicalHost` has no owning `Cluster` to read `spec.paused` from. See [API Reference → Conditions and the CAPI mirror](api-reference.md#conditions-and-the-capi-mirror).
 
 | Type | Meaning | True reason | Other reasons |
 |---|---|---|---|
 | `RedfishConnectionReady` | BMC reachable and authenticating successfully. | `RedfishConnected` | `BMCUnreachable` (the BMC cannot be reached at the network level; retried every 15 s and clears by itself, so a `Beskar7Machine` holding the host waits for it), `CredentialsNotAuthorized` (the credentials Secret does not [authorise the address, or the CA Secret](#binding-the-credentials-to-their-bmc); no request is made, and a `Beskar7Machine` holding the host waits for the Secret to be annotated), `MissingCredentials` (the credentials Secret is missing, unreadable, or lacks `username`/`password`), `RedfishConnectionFailed`, `RedfishQueryFailed`, `InsecureCABundleConflict`, `CABundleFetchFailed`. |
 | `HostAvailable` | No consumer holds the host (`spec.consumerRef` is unset). Follows the claim only — BMC health is `RedfishConnectionReady`. | `HostAvailable` | `HostClaimed` (a consumer holds the host; back to `True` once the claim is released). |
 | `HostInspected` | An inspection report has been persisted. | `HostInspected` | `HostReleased` (host went back to `Available`; the prior run's inspection no longer describes it). |
+| `NetworkDataReady` | The Secret `spec.networkDataSecretRef` names can be served to the host. Present only while the field is set. See [Network data](#network-data). | `NetworkDataReady` | `SecretNotFound`, `SecretNotOptedIn` (no `network-data-host` annotation naming this host), `KeyMissing` (no non-empty `networkData` key), `TooLarge` (over 64 KiB). A claim waits before power-on while it is not `True`. |
 
 ## Deletion
 

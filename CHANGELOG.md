@@ -8,6 +8,21 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Added
 
+- **Per-host network data (#283 step 1, contract v4.3).** A `PhysicalHost` can name a Secret in the new
+  `spec.networkDataSecretRef`. The Secret holds netplan v2 under the `networkData` key and opts in with the
+  annotation `beskar7.infrastructure.cluster.x-k8s.io/network-data-host: <host>`. The host reports a new
+  `NetworkDataReady` condition (`SecretNotFound`, `SecretNotOptedIn`, `KeyMissing`, `TooLarge`; cap 64 KiB),
+  and a `Beskar7Machine` does not power the host on while it is not `True`
+  (`InfrastructureReady=False`, `WaitingForNetworkData`). The callback server gains
+  `GET /api/v1/networkdata/{ns}/{host}`, bearer-gated like `/bootstrap`: `200` with the bytes verbatim, `404`
+  when the host names no Secret, `409` when the Secret cannot be served. The v4.3 inspector fetches it before
+  the disk write and writes it to `COS_OEM:/oem/beskar7/network-data` (`0600`, root, no `.yaml` extension, so
+  Kairos never runs it). beskar7 never parses the content; applying it is the OS image's job (on kMetal,
+  `beskar7-node-agent`). Hosts without the field are unaffected. Set it only with a v4.3 inspector: an older
+  one installs the host without its network. The callback-only Role needs nothing new (Secret `get`). See
+  [`docs/physicalhost.md`](docs/physicalhost.md#network-data) and
+  [`docs/inspector-contract.md`](docs/inspector-contract.md) §4.6.
+
 - **The controller sets `Node.spec.providerID` on the workload cluster (#297).** A Node that registered
   without a providerID left its CAPI `Machine` at `Provisioned` with no `nodeRef`, and CAPI kept the
   `node.cluster.x-k8s.io/uninitialized` taint on it. Once the host is `Ready`, and until the `Machine` has a

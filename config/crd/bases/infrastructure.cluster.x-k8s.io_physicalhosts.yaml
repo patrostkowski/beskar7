@@ -65,6 +65,9 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              networkDataSecretRef:
+                maxLength: 253
+                type: string
               redfishConnection:
                 properties:
                   address:
